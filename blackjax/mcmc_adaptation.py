@@ -18,31 +18,22 @@ def window_adaptation(
     **parameters,
 ) -> AdaptationAlgorithm:
 
-    kernel = algorithm.new_kernel()
+    kernel_fn = algorithm.new_kernel()
 
-    def kernel_factory(step_size: float, inverse_mass_matrix: Array):
-        return jax.jit(
-            functools.partial(
-                kernel,
-                logprob_fn=logprob_fn,
-                step_size=step_size,
-                inverse_mass_matrix=inverse_mass_matrix,
-                **parameters,
-            ),
-            static_argnames=["logprob_fn"],
+    def kernel(rng_key, state, step_size, inverse_mass_matrix):
+        return kernel_fn(
+            rng_key, state, logprob_fn, step_size, inverse_mass_matrix, **parameters
         )
 
     def init_fn(position: PyTree):
-        return jax.jit(algorithm.init, static_argnames=["logprob_fn"])(
-            position, logprob_fn
-        )
+        return algorithm.init(position, logprob_fn)
 
     def run(rng_key: PRNGKey, position: PyTree, num_steps: int = 1000):
 
         init_state = init_fn(position)
         schedule_fn = window_adaptation_schedule(num_steps)
         init, update, final = window_adaptation_base(
-            kernel_factory,
+            kernel,
             schedule_fn,
             is_mass_matrix_diagonal,
             target_acceptance_rate=target_acceptance_rate,
@@ -64,8 +55,10 @@ def window_adaptation(
         last_chain_state, last_warmup_state = last_state
 
         step_size, inverse_mass_matrix = final(last_warmup_state)
-        kernel = kernel_factory(step_size, inverse_mass_matrix)
+        kernel_last = functools.partial(
+            kernel, step_size=step_size, inverse_mass_matrix=inverse_mass_matrix
+        )
 
-        return last_chain_state, kernel, (step_size, inverse_mass_matrix)
+        return last_chain_state, kernel_last, (step_size, inverse_mass_matrix)
 
     return AdaptationAlgorithm(run)

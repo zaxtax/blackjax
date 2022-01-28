@@ -26,7 +26,7 @@ class WindowAdaptationState(NamedTuple):
 
 
 def window_adaptation_base(
-    kernel_factory: Callable,
+    kernel: Callable,
     schedule_fn: Callable,
     is_mass_matrix_diagonal: bool,
     target_acceptance_rate: float = 0.65,
@@ -100,15 +100,14 @@ def window_adaptation_base(
 
         """
         mm_state = slow_init(initial_state)
+        inverse_mass_matrix = mm_state.inverse_mass_matrix
 
-        kernel = lambda step_size: kernel_factory(
-            step_size, mm_state.inverse_mass_matrix
-        )
         step_size = find_reasonable_step_size(
             rng_key,
             kernel,
             initial_state,
             initial_step_size,
+            inverse_mass_matrix,
             target_acceptance_rate,
         )
         da_state = fast_init(step_size)
@@ -151,9 +150,10 @@ def window_adaptation_base(
         """
         step_size = jnp.exp(adaptation_state.da_state.log_step_size)
         inverse_mass_matrix = adaptation_state.mm_state.inverse_mass_matrix
-        kernel = kernel_factory(step_size, inverse_mass_matrix)
 
-        chain_state, chain_info = kernel(rng_key, chain_state)
+        chain_state, chain_info = kernel(
+            rng_key, chain_state, step_size, inverse_mass_matrix
+        )
 
         stage, is_middle_window_end = schedule_fn(adaptation_state.step)
 

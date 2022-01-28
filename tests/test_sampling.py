@@ -105,13 +105,13 @@ normal_test_cases = [
         "num_sampling_steps": 6000,
         "burnin": 5_000,
     },
-    {
-        "algorithm": blackjax.nuts,
-        "initial_position": jnp.array(100.0),
-        "parameters": {"step_size": 0.1, "inverse_mass_matrix": jnp.array([0.1])},
-        "num_sampling_steps": 6000,
-        "burnin": 5_000,
-    },
+    # {
+    #     "algorithm": blackjax.nuts,
+    #     "initial_position": jnp.array(100.0),
+    #     "parameters": {"step_size": 0.1, "inverse_mass_matrix": jnp.array([0.1])},
+    #     "num_sampling_steps": 6000,
+    #     "burnin": 5_000,
+    # },
     {
         "algorithm": blackjax.rmh,
         "initial_position": 1.0,

@@ -29,11 +29,15 @@ class Proposal(NamedTuple):
 def proposal_generator(
     kinetic_energy: Callable, divergence_threshold: float
 ) -> Tuple[Callable, Callable]:
-    def new(state: IntegratorState) -> Proposal:
-        energy = state.potential_energy + kinetic_energy(state.momentum)
+    def new(state: IntegratorState, inverse_mass_matrix) -> Proposal:
+        energy = state.potential_energy + kinetic_energy(
+            state.momentum, inverse_mass_matrix
+        )
         return Proposal(state, energy, 0.0, -np.inf)
 
-    def update(initial_energy: float, state: IntegratorState) -> Tuple[Proposal, bool]:
+    def update(
+        initial_energy: float, state: IntegratorState, inverse_mass_matrix
+    ) -> Tuple[Proposal, bool]:
         """Generate a new proposal from a trajectory state.
 
         The trajectory state records information about the position in the state
@@ -50,7 +54,9 @@ def proposal_generator(
             The new state.
 
         """
-        new_energy = state.potential_energy + kinetic_energy(state.momentum)
+        new_energy = state.potential_energy + kinetic_energy(
+            state.momentum, inverse_mass_matrix
+        )
 
         delta_energy = initial_energy - new_energy
         delta_energy = jnp.where(jnp.isnan(delta_energy), -jnp.inf, delta_energy)

@@ -75,7 +75,7 @@ def iterative_uturn_numpyro(is_turning):
         idx_min = idx_max - num_subtrees + 1
         return idx_min, idx_max
 
-    def _is_iterative_turning(checkpoints, momentum_sum, momentum):
+    def _is_iterative_turning(checkpoints, momentum_sum, momentum, inverse_mass_matrix):
         """Checks whether there is a U-turn in the iteratively built expanded trajectory.
         These checks only need to be performed as specific points.
 
@@ -89,7 +89,7 @@ def iterative_uturn_numpyro(is_turning):
         def _body_fn(state):
             i, _ = state
             subtree_r_sum = r_sum - r_sum_ckpts[i] + r_ckpts[i]
-            return i - 1, is_turning(r_ckpts[i], r, subtree_r_sum)
+            return i - 1, is_turning(r_ckpts[i], r, subtree_r_sum, inverse_mass_matrix)
 
         _, turning = jax.lax.while_loop(
             lambda it: (it[0] >= idx_min) & ~it[1], _body_fn, (idx_max, False)

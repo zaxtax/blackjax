@@ -105,27 +105,29 @@ def hmc_kernel(
         def potential_fn(x):
             return -logprob_fn(x)
 
-        momentum_generator, kinetic_energy_fn, _ = metrics.gaussian_euclidean(
-            inverse_mass_matrix
-        )
+        momentum_generator, kinetic_energy_fn, _ = metrics.gaussian_euclidean()
         symplectic_integrator = integrator(potential_fn, kinetic_energy_fn)
         proposal_generator = hmc_proposal(
             symplectic_integrator,
             kinetic_energy_fn,
-            step_size,
-            num_integration_steps,
             divergence_threshold,
         )
 
         key_momentum, key_integrator = jax.random.split(rng_key, 2)
 
         position, potential_energy, potential_energy_grad = state
-        momentum = momentum_generator(key_momentum, position)
+        momentum = momentum_generator(key_momentum, position, inverse_mass_matrix)
 
         integrator_state = integrators.IntegratorState(
             position, momentum, potential_energy, potential_energy_grad
         )
-        proposal, info = proposal_generator(key_integrator, integrator_state)
+        proposal, info = proposal_generator(
+            key_integrator,
+            integrator_state,
+            step_size,
+            inverse_mass_matrix,
+            num_integration_steps,
+        )
         proposal = HMCState(
             proposal.position, proposal.potential_energy, proposal.potential_energy_grad
         )
@@ -136,11 +138,7 @@ def hmc_kernel(
 
 
 def hmc_proposal(
-    integrator: Callable,
-    kinetic_energy: Callable,
-    step_size: float,
-    num_integration_steps: int = 1,
-    divergence_threshold: float = 1000,
+    integrator: Callable, kinetic_energy: Callable, divergence_threshold: float = 1000
 ) -> Callable:
     """Vanilla HMC algorithm.
 
@@ -158,6 +156,8 @@ def hmc_proposal(
         Function that computes the kinetic energy.
     step_size
         Size of the integration step.
+    inverse_mass_matrix
+        The inverse mass matrix that characterizes the euclidean metric.
     num_integration_steps
         Number of times we run the symplectic integrator to build the trajectory
     divergence_threshold
@@ -194,13 +194,21 @@ def hmc_proposal(
         )
 
     def generate(
-        rng_key, state: integrators.IntegratorState
+        rng_key,
+        state: integrators.IntegratorState,
+        step_size,
+        inverse_mass_matrix,
+        num_integration_steps,
     ) -> Tuple[integrators.IntegratorState, HMCInfo]:
         """Generate a new chain state."""
-        end_state = build_trajectory(state, step_size, num_integration_steps)
+        end_state = build_trajectory(
+            state, step_size, inverse_mass_matrix, num_integration_steps
+        )
         end_state = flip_momentum(end_state)
-        proposal = init_proposal(state)
-        new_proposal, is_diverging = generate_proposal(proposal.energy, end_state)
+        proposal = init_proposal(state, inverse_mass_matrix)
+        new_proposal, is_diverging = generate_proposal(
+            proposal.energy, end_state, inverse_mass_matrix
+        )
         sampled_proposal, *info = sample_proposal(rng_key, proposal, new_proposal)
         do_accept, p_accept = info
 

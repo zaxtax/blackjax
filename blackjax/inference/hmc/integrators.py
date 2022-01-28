@@ -4,7 +4,7 @@ from typing import Callable, NamedTuple
 import jax
 
 from blackjax.inference.hmc.metrics import EuclideanKineticEnergy
-from blackjax.types import PyTree
+from blackjax.types import PyTree, Array
 
 __all__ = ["mclachlan", "velocity_verlet", "yoshida"]
 
@@ -68,9 +68,11 @@ def velocity_verlet(
     a2 = 1 - 2 * a1
 
     potential_grad_fn = jax.value_and_grad(potential_fn)
-    kinetic_energy_grad_fn = jax.grad(kinetic_energy_fn)
+    kinetic_energy_grad_fn = jax.grad(kinetic_energy_fn, argnums=0)
 
-    def one_step(state: IntegratorState, step_size: float) -> IntegratorState:
+    def one_step(
+        state: IntegratorState, step_size: float, inverse_mass_matrix: Array
+    ) -> IntegratorState:
         position, momentum, _, potential_energy_grad = state
 
         momentum = jax.tree_util.tree_multimap(
@@ -79,7 +81,7 @@ def velocity_verlet(
             potential_energy_grad,
         )
 
-        kinetic_grad = kinetic_energy_grad_fn(momentum)
+        kinetic_grad = kinetic_energy_grad_fn(momentum, inverse_mass_matrix)
         position = jax.tree_util.tree_multimap(
             lambda position, kinetic_grad: position + a2 * step_size * kinetic_grad,
             position,

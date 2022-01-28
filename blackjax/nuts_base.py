@@ -109,7 +109,7 @@ def nuts_kernel(
             momentum_generator,
             kinetic_energy_fn,
             uturn_check_fn,
-        ) = metrics.gaussian_euclidean(inverse_mass_matrix)
+        ) = metrics.gaussian_euclidean()
         symplectic_integrator = integrator(potential_fn, kinetic_energy_fn)
         proposal_generator = iterative_nuts_proposal(
             symplectic_integrator,
@@ -122,12 +122,14 @@ def nuts_kernel(
         key_momentum, key_integrator = jax.random.split(rng_key, 2)
 
         position, potential_energy, potential_energy_grad = state
-        momentum = momentum_generator(key_momentum, position)
+        momentum = momentum_generator(key_momentum, position, inverse_mass_matrix)
 
         integrator_state = integrators.IntegratorState(
             position, momentum, potential_energy, potential_energy_grad
         )
-        proposal, info = proposal_generator(key_integrator, integrator_state, step_size)
+        proposal, info = proposal_generator(
+            key_integrator, integrator_state, step_size, inverse_mass_matrix
+        )
         proposal = HMCState(
             proposal.position, proposal.potential_energy, proposal.potential_energy_grad
         )
@@ -186,15 +188,26 @@ def iterative_nuts_proposal(
         max_num_expansions,
     )
 
-    def _compute_energy(state: integrators.IntegratorState) -> float:
-        energy = state.potential_energy + kinetic_energy(state.momentum)
+    def _compute_energy(
+        state: integrators.IntegratorState, inverse_mass_matrix
+    ) -> float:
+        energy = state.potential_energy + kinetic_energy(
+            state.momentum, inverse_mass_matrix
+        )
         return energy
 
-    def propose(rng_key, initial_state: integrators.IntegratorState, step_size):
+    def propose(
+        rng_key,
+        initial_state: integrators.IntegratorState,
+        step_size,
+        inverse_mass_matrix,
+    ):
         initial_termination_state = new_termination_state(
             initial_state, max_num_expansions
         )
-        initial_energy = _compute_energy(initial_state)  # H0 of the HMC step
+        initial_energy = _compute_energy(
+            initial_state, inverse_mass_matrix
+        )  # H0 of the HMC step
         initial_proposal = proposal.Proposal(
             initial_state, initial_energy, 0.0, -np.inf
         )
@@ -209,7 +222,11 @@ def iterative_nuts_proposal(
         )
 
         expansion_state, info = expand(
-            rng_key, initial_expansion_state, initial_energy, step_size
+            rng_key,
+            initial_expansion_state,
+            initial_energy,
+            step_size,
+            inverse_mass_matrix,
         )
         is_diverging, is_turning = info
         num_doublings, sampled_proposal, new_trajectory, _ = expansion_state

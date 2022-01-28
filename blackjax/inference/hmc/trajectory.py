@@ -39,7 +39,7 @@ from blackjax.inference.hmc.proposal import (
     progressive_uniform_sampling,
     proposal_generator,
 )
-from blackjax.types import PRNGKey, PyTree
+from blackjax.types import Array, PRNGKey, PyTree
 
 
 class Trajectory(NamedTuple):
@@ -104,12 +104,16 @@ def static_integration(
     """Generate a trajectory by integrating several times in one direction."""
 
     def integrate(
-        initial_state: IntegratorState, step_size, num_integration_steps
+        initial_state: IntegratorState,
+        step_size,
+        inverse_mass_matrix,
+        num_integration_steps,
     ) -> IntegratorState:
+
         directed_step_size = direction * step_size
 
         def one_step(state, _):
-            state = integrator(state, directed_step_size)
+            state = integrator(state, directed_step_size, inverse_mass_matrix)
             return state, state
 
         last_state, _ = jax.lax.scan(
@@ -161,7 +165,8 @@ def dynamic_progressive_integration(
         direction: int,
         termination_state,
         max_num_steps: int,
-        step_size,
+        step_size: float,
+        inverse_mass_matrix: Array,
         initial_energy,
     ):
         """Integrate the trajectory starting from `initial_state` and update
@@ -202,8 +207,12 @@ def dynamic_progressive_integration(
             step, proposal, trajectory, termination_state = integration_state
             rng_key, proposal_key = jax.random.split(rng_key)
 
-            new_state = integrator(trajectory.rightmost_state, direction * step_size)
-            new_proposal, is_diverging = generate_proposal(initial_energy, new_state)
+            new_state = integrator(
+                trajectory.rightmost_state, direction * step_size, inverse_mass_matrix
+            )
+            new_proposal, is_diverging = generate_proposal(
+                initial_energy, new_state, inverse_mass_matrix
+            )
 
             new_trajectory = append_to_trajectory(trajectory, new_state)
             sampled_proposal = sample_proposal(proposal_key, proposal, new_proposal)
@@ -212,7 +221,10 @@ def dynamic_progressive_integration(
                 termination_state, new_trajectory.momentum_sum, new_state.momentum, step
             )
             has_terminated = is_criterion_met(
-                new_termination_state, new_trajectory.momentum_sum, new_state.momentum
+                new_termination_state,
+                new_trajectory.momentum_sum,
+                new_state.momentum,
+                inverse_mass_matrix,
             )
 
             new_integration_state = DynamicIntegrationState(
@@ -227,14 +239,21 @@ def dynamic_progressive_integration(
         # Take the first step (step 0) that starts the new trajectory with proposal,
         # so that at for step k > 0 in the while loop we can just append the new
         # state to the trajectory and generate new proposal.
-        state_step0 = integrator(initial_state, direction * step_size)
-        initial_proposal, is_diverging = generate_proposal(initial_energy, state_step0)
+        state_step0 = integrator(
+            initial_state, direction * step_size, inverse_mass_matrix
+        )
+        initial_proposal, is_diverging = generate_proposal(
+            initial_energy, state_step0, inverse_mass_matrix
+        )
         trajectory0 = Trajectory(state_step0, state_step0, state_step0.momentum, 1)
         termination_state0 = update_termination_state(
             termination_state, trajectory0.momentum_sum, state_step0.momentum, 0
         )
         has_terminated = is_criterion_met(
-            termination_state0, trajectory0.momentum_sum, state_step0.momentum
+            termination_state0,
+            trajectory0.momentum_sum,
+            state_step0.momentum,
+            inverse_mass_matrix,
         )
         initial_integration_state = DynamicIntegrationState(
             1,
@@ -316,6 +335,7 @@ def dynamic_recursive_integration(
         direction: int,
         tree_depth: int,
         step_size,
+        inverse_mass_matrix: Array,
         initial_energy: float,
     ):
         """Integrate the trajectory starting from `initial_state` and update
@@ -342,8 +362,12 @@ def dynamic_recursive_integration(
         """
         if tree_depth == 0:
             # Base case - take one leapfrog step in the direction v.
-            next_state = integrator(initial_state, direction * step_size)
-            new_proposal, is_diverging = generate_proposal(initial_energy, next_state)
+            next_state = integrator(
+                initial_state, direction * step_size, inverse_mass_matrix
+            )
+            new_proposal, is_diverging = generate_proposal(
+                initial_energy, next_state, inverse_mass_matrix
+            )
             trajectory = Trajectory(next_state, next_state, next_state.momentum, 1)
             return (
                 rng_key,
@@ -399,6 +423,7 @@ def dynamic_recursive_integration(
                         trajectory.leftmost_state.momentum,
                         trajectory.rightmost_state.momentum,
                         trajectory.momentum_sum,
+                        inverse_mass_matrix,
                     )
                     if use_robust_uturn_check & (tree_depth - 1 > 0):
                         momentum_sum_left = jax.tree_util.tree_multimap(
@@ -420,6 +445,7 @@ def dynamic_recursive_integration(
                             left_trajectory.rightmost_state.momentum,
                             right_trajectory.rightmost_state.momentum,
                             momentum_sum_right,
+                            inverse_mass_matrix,
                         )
                         is_turning = is_turning | is_turning_left | is_turning_right
                 rng_key, proposal_key = jax.random.split(rng_key)
@@ -493,6 +519,7 @@ def dynamic_multiplicative_expansion(
         initial_expansion_state: DynamicExpansionState,
         initial_energy: float,
         step_size: float,
+        inverse_mass_matrix: Array,
     ):
         def do_keep_expanding(loop_state) -> bool:
             """Determine whether we need to keep expanding the trajectory."""
@@ -545,6 +572,7 @@ def dynamic_multiplicative_expansion(
                 termination_state,
                 rate ** step,
                 step_size,
+                inverse_mass_matrix,
                 initial_energy,
             )
 
@@ -579,6 +607,7 @@ def dynamic_multiplicative_expansion(
                 merged_trajectory.leftmost_state.momentum,
                 merged_trajectory.rightmost_state.momentum,
                 merged_trajectory.momentum_sum,
+                inverse_mass_matrix,
             )
 
             new_state = DynamicExpansionState(

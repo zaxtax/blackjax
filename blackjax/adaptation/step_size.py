@@ -1,4 +1,5 @@
 """Step size adaptation"""
+import functools
 from typing import Callable, NamedTuple, Tuple
 
 import jax
@@ -6,6 +7,8 @@ import jax.numpy as jnp
 
 import blackjax.optimizers as optimizers
 from blackjax.hmc_base import HMCState
+from blackjax.types import Array
+
 
 __all__ = [
     "dual_averaging_adaptation",
@@ -172,9 +175,10 @@ class ReasonableStepSizeState(NamedTuple):
 
 def find_reasonable_step_size(
     rng_key: PRNGKey,
-    kernel_generator: Callable[[float], Callable],
+    kernel: Callable[[float], Callable],
     reference_state: HMCState,
     initial_step_size: float,
+    inverse_mass_matrix: Array,
     target_accept: float = 0.65,
 ) -> float:
     """Find a reasonable initial step size during warmup.
@@ -250,8 +254,7 @@ def find_reasonable_step_size(
         _, rng_key = jax.random.split(rng_key)
 
         step_size = (2.0 ** direction) * step_size
-        kernel = kernel_generator(step_size)
-        _, info = kernel(rng_key, reference_state)
+        _, info = kernel(rng_key, reference_state, step_size, inverse_mass_matrix)
 
         new_direction = jnp.where(target_accept < info.acceptance_probability, 1, -1)
         return ReasonableStepSizeState(rng_key, new_direction, direction, step_size)

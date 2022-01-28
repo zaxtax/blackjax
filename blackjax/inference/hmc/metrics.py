@@ -34,9 +34,7 @@ __all__ = ["gaussian_euclidean"]
 EuclideanKineticEnergy = Callable[[PyTree], float]
 
 
-def gaussian_euclidean(
-    inverse_mass_matrix: Array,
-) -> Tuple[Callable, EuclideanKineticEnergy, Callable]:
+def gaussian_euclidean() -> Tuple[Callable, EuclideanKineticEnergy, Callable]:
     r"""Hamiltonian dynamic on euclidean manifold with normally-distributed momentum.
 
     The gaussian euclidean metric is a euclidean metric further characterized
@@ -74,42 +72,53 @@ def gaussian_euclidean(
             Information. Springer, Berlin, Heidelberg, 2013.
 
     """
-    ndim = jnp.ndim(inverse_mass_matrix)  # type: ignore[arg-type]
-    shape = jnp.shape(inverse_mass_matrix)[:1]  # type: ignore[arg-type]
 
-    if ndim == 1:  # diagonal mass matrix
-        mass_matrix_sqrt = jnp.sqrt(jnp.reciprocal(inverse_mass_matrix))
-        dot, matmul = jnp.multiply, jnp.multiply
-
-    elif ndim == 2:
-        tril_inv = jscipy.linalg.cholesky(inverse_mass_matrix)
-        identity = jnp.identity(shape[0])
-        mass_matrix_sqrt = jscipy.linalg.solve_triangular(
-            tril_inv, identity, lower=True
-        )
-        dot, matmul = jnp.dot, jnp.matmul
-
-    else:
-        raise ValueError(
-            "The mass matrix has the wrong number of dimensions:"
-            f" expected 1 or 2, got {jnp.ndim(inverse_mass_matrix)}."  # type: ignore[arg-type]
-        )
-
-    def momentum_generator(rng_key: PRNGKey, position: PyTree) -> PyTree:
+    def momentum_generator(
+        rng_key: PRNGKey, position: PyTree, inverse_mass_matrix: Array
+    ) -> PyTree:
         _, unravel_fn = ravel_pytree(position)
+        shape = jnp.shape(inverse_mass_matrix)[:1]
         standard_normal_sample = jax.random.normal(rng_key, shape)
-        momentum = dot(mass_matrix_sqrt, standard_normal_sample)
+
+        if inverse_mass_matrix.ndim == 1:
+            mass_matrix_sqrt = jnp.sqrt(jnp.reciprocal(inverse_mass_matrix))
+            momentum = jnp.multiply(mass_matrix_sqrt, standard_normal_sample)
+        elif inverse_mass_matrix.ndim == 2:
+            tril_inv = jscipy.linalg.cholesky(inverse_mass_matrix)
+            identity = jnp.identity(shape[0])
+            mass_matrix_sqrt = jscipy.linalg.solve_triangular(
+                tril_inv, identity, lower=True
+            )
+            momentum = jnp.dot(mass_matrix_sqrt, standard_normal_sample)
+        else:
+            raise ValueError(
+                "The mass matrix has the wrong number of dimensions:"
+                f" expected 1 or 2, got {jnp.ndim(inverse_mass_matrix)}."  # type: ignore[arg-type]
+            )
+
         momentum_unravel = unravel_fn(momentum)
         return momentum_unravel
 
-    def kinetic_energy(momentum: PyTree) -> float:
+    def kinetic_energy(momentum: PyTree, inverse_mass_matrix: Array) -> float:
         momentum, _ = ravel_pytree(momentum)
-        velocity = matmul(inverse_mass_matrix, momentum)
-        kinetic_energy_val = 0.5 * jnp.dot(velocity, momentum)
-        return kinetic_energy_val
+
+        if inverse_mass_matrix.ndim == 1:
+            velocity = jnp.multiply(inverse_mass_matrix, momentum)
+        elif inverse_mass_matrix.ndim == 2:
+            velocity = jnp.matmul(inverse_mass_matrix, momentum)
+        else:
+            raise ValueError(
+                "The mass matrix has the wrong number of dimensions:"
+                f" expected 1 or 2, got {jnp.ndim(inverse_mass_matrix)}."  # type: ignore[arg-type]
+            )
+
+        return 0.5 * jnp.dot(velocity, momentum)
 
     def is_turning(
-        momentum_left: PyTree, momentum_right: PyTree, momentum_sum: PyTree
+        momentum_left: PyTree,
+        momentum_right: PyTree,
+        momentum_sum: PyTree,
+        inverse_mass_matrix: Array,
     ) -> bool:
         """Generalized U-turn criterion.
 
@@ -130,10 +139,18 @@ def gaussian_euclidean(
         m_right, _ = ravel_pytree(momentum_right)
         m_sum, _ = ravel_pytree(momentum_sum)
 
-        velocity_left = matmul(inverse_mass_matrix, m_left)
-        velocity_right = matmul(inverse_mass_matrix, m_right)
+        if inverse_mass_matrix.ndim == 1:
+            velocity_left = jnp.multiply(inverse_mass_matrix, m_left)
+            velocity_right = jnp.multiply(inverse_mass_matrix, m_right)
+        elif inverse_mass_matrix.ndim == 2:
+            velocity_left = jnp.matmul(inverse_mass_matrix, m_left)
+            velocity_right = jnp.matmul(inverse_mass_matrix, m_right)
+        else:
+            raise ValueError(
+                "The mass matrix has the wrong number of dimensions:"
+                f" expected 1 or 2, got {jnp.ndim(inverse_mass_matrix)}."  # type: ignore[arg-type]
+            )
 
-        # rho = m_sum
         rho = m_sum - (m_right + m_left) / 2
         turning_at_left = jnp.dot(velocity_left, rho) <= 0
         turning_at_right = jnp.dot(velocity_right, rho) <= 0
