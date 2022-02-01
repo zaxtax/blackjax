@@ -39,26 +39,31 @@ def window_adaptation(
             target_acceptance_rate=target_acceptance_rate,
         )
 
-        @jax.jit
         def one_step(carry, rng_key):
             state, warmup_state = carry
-            state, warmup_state, info = update(rng_key, state, warmup_state)
-            return ((state, warmup_state), (state, warmup_state, info))
+            state, warmup_state, _ = update(rng_key, state, warmup_state)
+            return (state, warmup_state)
+        
 
         warmup_state = init(rng_key, init_state, initial_step_size)
-        keys = jax.random.split(rng_key, num_steps + 1)[1:]
-        last_state, warmup_chain = jax.lax.scan(
-            one_step,
-            (init_state, warmup_state),
-            keys,
-        )
-        last_chain_state, last_warmup_state = last_state
-
-        step_size, inverse_mass_matrix = final(last_warmup_state)
+        step_size, inverse_mass_matrix = final(warmup_state)
         kernel_last = functools.partial(
-            kernel, step_size=step_size, inverse_mass_matrix=inverse_mass_matrix
+             kernel, step_size=step_size, inverse_mass_matrix=inverse_mass_matrix
         )
 
-        return last_chain_state, kernel_last, (step_size, inverse_mass_matrix)
+        return (kernel_last, init_state, warmup_state, one_step)
+        # last_state, warmup_chain = jax.lax.scan(
+        #     one_step,
+        #     (init_state, warmup_state),
+        #     keys,
+        # )
+        # last_chain_state, last_warmup_state = last_state
+
+        # step_size, inverse_mass_matrix = final(last_warmup_state)
+        # kernel_last = functools.partial(
+        #     kernel, step_size=step_size, inverse_mass_matrix=inverse_mass_matrix
+        # )
+
+        # return last_chain_state, kernel_last, (step_size, inverse_mass_matrix)
 
     return AdaptationAlgorithm(run)

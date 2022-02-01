@@ -102,14 +102,7 @@ def window_adaptation_base(
         mm_state = slow_init(initial_state)
         inverse_mass_matrix = mm_state.inverse_mass_matrix
 
-        step_size = find_reasonable_step_size(
-            rng_key,
-            kernel,
-            initial_state,
-            initial_step_size,
-            inverse_mass_matrix,
-            target_acceptance_rate,
-        )
+        step_size = initial_step_size
         da_state = fast_init(step_size)
 
         warmup_state = WindowAdaptationState(da_state, mm_state, 0)
